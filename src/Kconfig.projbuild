@@ -1,0 +1,54 @@
+menu "Strava display hardware (Altium 2026-10-09)"
+config DISPLAY_SERIAL_DEBUG
+    bool "Temporary serial debugging: stay awake and accept s/n/m commands"
+    default n
+    help
+        Disable deep sleep while diagnosing the installed display. Commands:
+        s status, n refresh, m next display mode. Never print credentials.
+
+config DISPLAY_BOARD_VERIFIED
+    bool "Board pin assignment checked; enable hardware"
+    default n
+config DISPLAY_DATA_GPIO
+    int "LED data GPIO (-1 = unassigned)"
+    range -1 48
+    default 21
+config DISPLAY_POWER_GPIO
+    int "Active-high LED supply enable GPIO (-1 = unassigned)"
+    range -1 48
+    default 19
+config DISPLAY_OE_GPIO
+    int "Optional buffer enable GPIO (active-high; -1 = no enable pin)"
+    range -1 48
+    default -1
+config DISPLAY_TOUCH_GPIO
+    int "Touch GPIO (-1 = unassigned; ESP32 GPIO4 is channel T0)"
+    range -1 33
+    default 4
+config DISPLAY_PERSIST_TOUCH_CALIBRATION
+    bool "Persist touch calibration across power cycles (fixed pad)"
+    default n
+    help
+        Enable for a fixed pad to save its first valid baseline in NVS.
+        Disabled for prototypes: ignore saved NVS calibration and calibrate
+        again after every cold start. RTC retention across deep sleep remains.
+
+config DISPLAY_CYCLING_ONLY
+    bool "Cycling only (swim and run zones remain warm white)"
+    default n
+    help
+        Disabled: show swimming, running and cycling (triathlon).
+        Enabled: show only cycling; swim and run zones keep the warm-white background.
+
+choice DISPLAY_SPORT_STYLE
+    prompt "Sport LED visualization"
+    default DISPLAY_SPORT_STYLE_RED_GREEN_SCALE
+
+config DISPLAY_SPORT_STYLE_FIXED_BRIGHTNESS
+    bool "Fixed sport color; all 3 LEDs use synchronized 0-100% brightness"
+
+config DISPLAY_SPORT_STYLE_RED_GREEN_SCALE
+    bool "All 3 LEDs use 0% red -> 50% yellow -> 100% green"
+
+endchoice
+endmenu
