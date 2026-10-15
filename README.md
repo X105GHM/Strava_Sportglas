@@ -1,132 +1,108 @@
-# Sportglas – ESP32-Firmware
+# Sportglas
 
-Eigenständiges PlatformIO-Projekt für die Sportglas-Platine mit
-ESP32-PICO-MINI-02-N8R2. Verwendet ESP-IDF 5.5.3, PlatformIO espressif32 6.13.0
-und C++20. Das Modul hat 8 MB Flash; PSRAM wird nicht verwendet.
-
-## Öffnen und bauen
-
-In VS Code diesen Projektordner mit PlatformIO öffnen. Alternativ im Terminal
-im Projektverzeichnis ausführen:
-
-```powershell
-pio run -e esp32-pico-mini02
-```
-
-PlatformIO lädt die benötigten Werkzeuge und Komponenten beim ersten Build.
-Das Projekt enthält seine eigene Build-Konfiguration und ist unabhängig von
-anderen lokalen Projekten.
-
-## Upload
-
-Der Upload verwendet den normalen esptool-Ablauf über einen USB-UART-Adapter
-mit 3,3-V-Logik. Den COM-Port an den angeschlossenen Adapter anpassen:
-
-```powershell
-pio run -e esp32-pico-mini02 -t upload --upload-port COM4
-```
-
-Ohne Auto-Reset-Beschaltung GPIO0/BOOT auf GND halten, EN/RESET kurz auslösen
-und den Upload starten. GPIO0 während des Verbindungsaufbaus wieder freigeben.
-Falls die Firmware nach dem Upload nicht automatisch startet, mit freiem GPIO0
-noch einmal EN/RESET auslösen.
-
-Die vorhandenen NVS-Daten bleiben beim normalen Firmware-Upload erhalten.
-
-| Anschluss am ESP | Verbindung zum USB-UART-Adapter |
-|---|---|
-| GPIO1 / TX | RX |
-| GPIO3 / RX | TX |
-| GND | GND |
-| GPIO0 | BOOT, für den Download-Modus auf GND |
-| EN | RESET |
-
-Die Platine benötigt ihre normale Versorgung. UART-Signale sind für 3,3 V ausgelegt.
-
-## Zugangsdaten und API
-
-Die lokalen Zugangsdaten stehen in `src/config/secrets.local.hpp` und wurden
-für dieses lokale Projekt übernommen. Die Datei wird von Git ignoriert.
-Bei einer frischen Kopie `src/config/secrets.example.hpp` nach
-`src/config/secrets.local.hpp` kopieren und folgende Werte eintragen:
-
-- `kSsid`: WLAN-Name
-- `kPassword`: WLAN-Passwort
-- `kEndpoint`: vollständige HTTPS-Adresse der Wochen-API
-- `kDeviceToken`: Bearer-Gerätetoken mit 64 Hexzeichen
-- `kEnabled`: `true` für die lokalen Zugangsdaten; `false` für Zugangsdaten aus NVS
-
-Der Profilname steht in `src/config/Config.hpp` unter `kProfileName` und wird
-als `X-Profile-Name` gesendet. Aktuell ist das Profil `Danilo` eingestellt.
-Die API-Adresse lautet `https://sport.x105ghm.com/api/v1/glass/weekly`.
-TLS prüft Zertifikat und Hostnamen. Nach Änderungen an Zugangsdaten erneut bauen
-und hochladen.
+Sportglas displays weekly cycling distance on an illuminated glass panel.
+Three LEDs indicate progress relative to the average weekly distance:
+red at 0%, yellow at 50%, and green at 100% or above. The remaining LEDs
+provide a warm white background. Activity data is retrieved over Wi-Fi
+from an HTTPS API.
 
 ## Hardware
 
-| Funktion | Anschluss |
+The board uses an ESP32-PICO-MINI-02-N8R2 with 8 MB of flash.
+The onboard PSRAM is not used. The strip contains 43 WS2812 LEDs
+with GRB color order.
+
+| Function | Connection |
 |---|---|
-| LED-Daten, 43 WS2812 in GRB-Reihenfolge | GPIO21 |
-| 5-V-Versorgung der LEDs freigeben, HIGH = ein | GPIO19 |
-| Touch-Elektrode, Kanal T0 | GPIO4 |
-| OE# des AHCT-Buffers | fest GND |
+| LED data | GPIO21 |
+| LED 5 V supply enable, HIGH = on | GPIO19 |
+| Touch electrode, channel T0 | GPIO4 |
+| AHCT buffer OE# | Permanently connected to GND |
+| UART TX / RX, 3.3 V logic | GPIO1 / GPIO3 |
 
-Die Radfahr-Anzeige verwendet LEDs 20–22, vom DIN-Ende ab 1 gezählt.
-Aktuell ist nur Radfahren aktiv; die übrigen LEDs bilden den warmweißen
-Hintergrund. Die Farbskala reicht von Rot über Gelb bis Grün. Die Firmware
-begrenzt den rechnerischen LED-Strom auf 900 mA.
+The cycling indicator uses LEDs 20–22, numbered from 1 at the DIN end.
+The firmware applies brightness adjustment, gamma correction, and an estimated
+900 mA LED current limit. The power supply must support the actual load.
 
-## Bedienung und Schlafbetrieb
+## Controls and display
 
-Touch schaltet `AUS → SPORT → WARMWEISS → AUS`. Beim Einschalten das Pad
-für die Kalibrierung zunächst freilassen. Ein gehaltener Finger zählt einmal;
-vor der nächsten Berührung muss das Pad wieder freigegeben sein.
+Each touch cycles through `OFF → SPORT → WARM WHITE → OFF`.
+Holding the pad counts as one touch; release it before touching again.
+Leave the pad untouched during startup calibration.
 
-Umschalten zeigt die gespeicherten Werte. Ein API-Abruf erfolgt nach dem Start
-und anschließend stündlich, bei Fehlern nach fünf Minuten. Fehlgeschlagene
-Abrufe behalten den letzten gültigen Datensatz. Neue Werte verändern eine
-bereits sichtbare Sportfarbe mit einem Fade von 800 ms.
+SPORT uses the most recently saved values. Until a valid dataset is available,
+the display remains warm white. If a valid dataset contains zero for both
+the current distance and the comparison value, the sport zone remains dark.
 
-Nach einer Berührung bleibt der ESP zwei Sekunden wach. Danach verwendet er
-Light Sleep mit Touch-Wakeup. Alle 30 Sekunden prüft ein kurzer Timer-Wakeup
-den Sensor; dabei wird keine zusätzliche API-Abfrage gestartet. WLAN und HTTPS
-laufen in einem eigenen Task. Light Sleep benötigt mehr Ruhestrom als Deep Sleep.
+When new API data changes an already visible sport color, the display fades
+to the new color over 800 ms. The background remains unchanged.
+A touch can interrupt the transition.
 
-Der Modus wird nach Ende der Bedienung gespeichert. Bei sofortigem Trennen der
-Versorgung kann deshalb noch der vorherige Modus gespeichert sein.
+The selected mode is saved after interaction has ended. Disconnecting power
+immediately after switching modes may therefore leave the previous mode saved.
 
-Reguläre Anwendungs- und Bootloader-Logs sind ausgeschaltet. Eine ROM-Startmeldung
-des ESP32 kann beim Reset weiterhin erscheinen. Den seriellen Monitor öffnet man mit:
+## Data retrieval and sleep
 
-```powershell
-pio device monitor -e esp32-pico-mini02 --port COM4
-```
+The firmware requests data after startup and then once per hour. After a failed
+request, it retries after five minutes. Switching modes does not trigger an
+additional request. Invalid responses and connection failures leave the last
+valid dataset intact, including across a change of week.
 
-## Dateien und Einstellungen
+Wi-Fi, clock synchronization, and HTTPS run in a separate FreeRTOS task while
+touch controls remain responsive. TLS verifies the certificate and hostname.
+API responses are checked for valid structure, values, and timestamps before
+being accepted. If the network task stalls for more than 90 seconds,
+the ESP restarts.
 
-| Datei oder Verzeichnis | Inhalt |
+After a touch, the ESP stays awake for two seconds and samples the pad every
+20 ms. It then enters light sleep with touch wakeup. A brief timer wakeup
+checks the sensor every 30 seconds without triggering an additional API request.
+Light sleep consumes more standby current than deep sleep.
+
+During sleep, the LED supply state is held according to the selected mode,
+and DATA is held LOW. GPIO holds are released after wakeup. When enabling
+the LED supply, the firmware waits 50 ms before transmitting data.
+LED transmission has a 100 ms timeout.
+
+Regular application and bootloader logs are disabled. The ESP32 ROM may still
+print a startup message over UART after a reset.
+
+## Configuration and API
+
+Wi-Fi and API credentials are stored in `src/config/secrets.local.hpp`.
+This file is ignored by Git. `src/config/secrets.example.hpp` describes
+the required entries.
+
+| Entry | Meaning |
 |---|---|
-| `platformio.ini` | Board, Toolchain, Flashgröße und Upload |
-| `sdkconfig.defaults` | ESP-IDF-Vorgaben, Pins, Darstellung und Log-Einstellungen |
-| `partitions.csv` | Flashaufteilung einschließlich NVS |
-| `src/AppController.cpp` | Bedienung, Abrufplan, Anzeige und Sleep-Ablauf |
-| `src/display/` | Farben, Übergänge und LED-Ausgabe |
-| `src/input/` | Touch-Messung und Entprellung |
-| `src/network/` | WLAN, HTTPS und Prüfung der API-Antwort |
-| `src/storage/` | Modus, letzter Datensatz und Zugangsdaten in NVS |
-| `src/power/` | LED-Versorgung und Light Sleep |
-| `.clang-format`, `.vscode/settings.json` | Formatierung und VS-Code-Einstellungen |
+| `kSsid` | Wi-Fi network name |
+| `kPassword` | Wi-Fi password |
+| `kEndpoint` | Full HTTPS URL of the weekly API |
+| `kDeviceToken` | Bearer device token containing 64 hexadecimal characters |
+| `kEnabled` | `true`: local credentials; `false`: credentials from NVS |
 
-Änderungen an den ESP-IDF-Vorgaben in `sdkconfig.defaults` vornehmen. Die Datei
-`SyncDisplayConfig.cmake` übernimmt Display- und Log-Vorgaben auch in eine bereits
-erzeugte sdkconfig. Bei Bedarf die Konfiguration neu erzeugen:
+The profile name is defined as `kProfileName` in `src/config/Config.hpp`
+and sent in the `X-Profile-Name` header. The current profile is `Danilo`.
+The endpoint is `https://sport.x105ghm.com/api/v1/glass/weekly`.
 
-```powershell
-pio run -e esp32-pico-mini02 -t clean
-pio run -e esp32-pico-mini02
-```
+Pin assignments, display mode settings, and ESP-IDF defaults are defined
+in `sdkconfig.defaults`. LED zones, colors, timing, and touch thresholds
+are defined in `src/config/Config.hpp`. Currently, only cycling is enabled.
 
-Formatierung: vier Leerzeichen, Klammern in eigener Zeile, eingerückte Namespaces
-und Präprozessor-Anweisungen. Kurze `if`-Anweisungen dürfen einzeilig bleiben.
-Das Zeilenlimit in `.clang-format` beträgt 240 Zeichen. Der VS-Code-Formatter
-behält die vorhandene Einrückung der Präprozessor-Anweisungen bei.
+## Firmware structure
+
+The firmware uses ESP-IDF 5.5.3 and C++20. Project settings are stored in
+`platformio.ini`; the flash layout, including NVS, is defined in `partitions.csv`.
+
+| File or directory | Purpose |
+|---|---|
+| `src/app_main.cpp` | NVS and network infrastructure initialization |
+| `src/AppController.cpp` | Mode switching, request scheduling, display, and sleep control |
+| `src/display/` | Color mapping, transitions, and LED output through RMT |
+| `src/input/` | Touch measurement, calibration, and debouncing |
+| `src/network/` | Wi-Fi, HTTPS requests, and API response validation |
+| `src/storage/` | Mode, dataset, and credentials in NVS |
+| `src/power/` | LED supply, GPIO holds, and light sleep |
+| `src/models/` | Shared data structures |
+
+This README was created with AI assistance.
